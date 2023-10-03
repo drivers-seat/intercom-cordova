@@ -12,7 +12,7 @@
 @implementation IntercomBridge : CDVPlugin
 
 - (void)pluginInitialize {
-    [Intercom setCordovaVersion:@"12.0.0"];
+    [Intercom setCordovaVersion:@"12.4.0"];
     #ifdef DEBUG
         [Intercom enableLogging];
     #endif
@@ -24,7 +24,7 @@
     [Intercom setApiKey:apiKey forAppId:appId];
 }
 
-- (void)registerIdentifiedUser:(CDVInvokedUrlCommand*)command {
+- (void)loginUserWithUserAttributes:(CDVInvokedUrlCommand*)command {
     NSDictionary* options = command.arguments[0];
     NSString* userId      = options[@"userId"];
     NSString* userEmail   = options[@"email"];
@@ -33,25 +33,36 @@
         userId = [(NSNumber *)userId stringValue];
     }
 
+    ICMUserAttributes *userAttributes = [ICMUserAttributes new];
+    
     if (userId.length > 0 && userEmail.length > 0) {
-        [Intercom registerUserWithUserId:userId email:userEmail];
-        [self sendSuccess:command];
+        userAttributes.userId = userId;
+        userAttributes.email = userEmail;
     } else if (userId.length > 0) {
-        [Intercom registerUserWithUserId:userId];
-        [self sendSuccess:command];
+        userAttributes.userId = userId;
     } else if (userEmail.length > 0) {
-        [Intercom registerUserWithEmail:userEmail];
-        [self sendSuccess:command];
+        userAttributes.email = userEmail;
     } else {
         NSLog(@"[Intercom-Cordova] ERROR - No user registered. You must supply an email, a userId or both");
         [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR]
                                     callbackId:command.callbackId];
+        return;
     }
+    
+    [Intercom loginUserWithUserAttributes:userAttributes success:^{
+        [self sendSuccess:command];
+    } failure:^(NSError * _Nonnull error) {
+        [self sendFailure:command withError:error];
+    }];
+    [self sendSuccess:command];
 }
 
-- (void)registerUnidentifiedUser:(CDVInvokedUrlCommand*)command {
-    [Intercom registerUnidentifiedUser];
-    [self sendSuccess:command];
+- (void)loginUnidentifiedUser:(CDVInvokedUrlCommand*)command {
+    [Intercom loginUnidentifiedUserWithSuccess:^{
+        [self sendSuccess:command];
+    } failure:^(NSError * _Nonnull error) {
+        [self sendFailure:command withError:error];
+    }];
 }
 
 - (void)logout:(CDVInvokedUrlCommand*)command {
@@ -68,7 +79,11 @@
 
 - (void)updateUser:(CDVInvokedUrlCommand*)command {
     NSDictionary* attributesDict = command.arguments[0];
-    [Intercom updateUser:[self userAttributesForDictionary:attributesDict]];
+    [Intercom updateUser:[self userAttributesForDictionary:attributesDict] success:^{
+        [self sendSuccess:command];
+    } failure:^(NSError * _Nonnull error) {
+        [self sendFailure:command withError:error];
+    }];
     [self sendSuccess:command];
 }
 
@@ -96,19 +111,8 @@
 }
 
 - (void)displayMessageComposer:(CDVInvokedUrlCommand*)command {
-    [Intercom presentMessageComposer:nil];
-    [self sendSuccess:command];
-}
-
-- (void)displayMessageComposerWithInitialMessage:(CDVInvokedUrlCommand*)command {
     NSString *initialMessage = command.arguments[0];
     [Intercom presentMessageComposer:initialMessage];
-    [self sendSuccess:command];
-}
-
-- (void)displayConversationsList:(CDVInvokedUrlCommand*)command {
-    NSLog(@"[Intercom-Cordova] WARNING - displayConversationsList is deprecated. Please use displayMessenger instead.");
-    [Intercom presentMessenger];
     [self sendSuccess:command];
 }
 
@@ -200,9 +204,10 @@
 
 - (void)registerForPush:(CDVInvokedUrlCommand*)command {
     UIApplication *application = [UIApplication sharedApplication];
-    [application registerUserNotificationSettings:[UIUserNotificationSettings
-                                 settingsForTypes:(UIUserNotificationTypeBadge | UIUserNotificationTypeSound | UIUserNotificationTypeAlert)
-                                       categories:nil]];
+    [[UNUserNotificationCenter currentNotificationCenter] requestAuthorizationWithOptions:(UNAuthorizationOptionAlert
+                                                                                           | UNAuthorizationOptionBadge
+                                                                                           | UNAuthorizationOptionSound)
+                                                                        completionHandler:^(BOOL granted, NSError * _Nullable error) {}];
     [application registerForRemoteNotifications];
     [self sendSuccess:command];
 }
@@ -220,6 +225,12 @@
 - (void)displayArticle:(CDVInvokedUrlCommand*)command {
   NSString *articleId = command.arguments[0];
     [Intercom presentArticle:articleId];
+    [self sendSuccess:command];
+}
+
+- (void)displaySurvey:(CDVInvokedUrlCommand*)command {
+  NSString *surveyId = command.arguments[0];
+    [Intercom presentSurvey:surveyId];
     [self sendSuccess:command];
 }
 
@@ -359,4 +370,9 @@
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
+- (void)sendFailure:(CDVInvokedUrlCommand*)command withError:(NSError *)error {
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                   messageAsNSInteger:error.code];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+}
 @end
